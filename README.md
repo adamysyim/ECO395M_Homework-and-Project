@@ -1,1 +1,1 @@
-# ECO395M_Homework-and-Project-
+This repository for assignments on ECO 395M: Data Mining and Statistical Learning
