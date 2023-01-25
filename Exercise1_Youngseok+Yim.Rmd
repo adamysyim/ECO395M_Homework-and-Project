@@ -1,0 +1,421 @@
+---
+title: "ECO395M_Exercise1"
+author: "Youngseok Yim (EID: yy9739)"
+date: "2023-01-30"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+## 1) Data visualization: flights at ABIA
+
+```{r, message=FALSE, echo=FALSE}
+library(tidyverse)
+library(ggplot2)
+ABIA <- read.csv("~/Desktop/ECO395M/data/ABIA.csv")
+```
+
+```{r, message=FALSE, echo=FALSE}
+A1= ABIA%>%
+  group_by(Month)%>%
+  summarize(mean_delay= mean(ArrDelay, na.rm =TRUE)) 
+
+ggplot(data=A1)+
+  geom_col(mapping= aes(x= factor(Month), y= mean_delay))+
+  labs(
+    title= "Figure 1.1 Average flight delays in various months of the year",
+    x="Month",
+    y="Average flight arrival delay"
+  )
+```
+
+As shown in Figure 1.1, we have months of the year, January(1) through December(12) in X-axis and average arrival delays of the flights in Y-axis. The graph shows the average arrival delays of the flights for each month. We can see that across September(9), October(10) and November(11), the average flight delays are at the lowest with no delays in September. Therefore, we can conclude that the best time of the year to fly when one can avoid delays would be in September, October and November
+
+
+```{r, message=FALSE, echo=FALSE}
+
+ABIA%>%
+  group_by(Dest)%>%
+  summarize(count= n())%>%
+  arrange(desc(count))
+popular_destinations = c('AUS', 'DAL', 'DFW', 'IAH', 'PHX', 'DEN', 'ORD', 'HOU', 'ATL')
+D1=ABIA%>%
+  filter(Dest %in% popular_destinations)%>%
+  group_by(Month, Dest)%>%
+  summarize(mean_delay= mean(ArrDelay, na.rm =TRUE))
+
+ggplot(data=D1)+
+  geom_col(mapping=aes(x= factor(Month), y= mean_delay))+
+  facet_wrap(~Dest, nrow=3)+
+  labs(
+    title= "Figure 1.2 Average flight delays in various months of the year 
+    faceted by popular destinations",
+    x= "Month",
+    y= "Averge flight arrival delay"
+  )
+```
+
+To examine whether this changes by destinations, I have faceted the bar plot by destination. As seen in the Figure 1.2, even considering various destinations, we can see that September, October and November have lower average arrival delays. Thus, we can conclude that this is the best time of the year to fly to minimize delays. 
+
+
+## 2) Wrangling the Olympics
+
+```{r, message=FALSE, echo=FALSE}
+library(tidyverse)
+olympics <- read.csv("~/Desktop/ECO395M/data/olympics_top20.csv")
+```
+
+A) 95th percentile of heights for female competitors across all Athletics events 
+
+```{r, message=FALSE, echo=FALSE}
+olympics %>%
+  group_by(sex) %>%
+  summarize(q95_height = quantile(height, probs = 0.95))
+```
+The 95th percentile of heights for female competitors across all Athletics events is 186 as shown on the table above
+
+B) Which single women's event had the greatest variability in competitor's heights across the entire history of the Olympics, as measured by the standard deviation?
+
+```{r, message=FALSE, echo=FALSE}
+sd_sorted = olympics %>%
+  filter(sex=='F') %>%
+  group_by(event) %>%
+  summarize(standard_deviation=sd(height)) %>% 
+  arrange(desc(standard_deviation))
+
+head(sd_sorted)
+```
+
+"Rowing Women's Coxed Fours" has the most variability(highest standard deviation) in competitor's height in women.
+
+C) How has the average age of Olympic swimmers changed over time? Does the trend look different for male swimmers relative to female swimmers? Create a data frame that can allow you to visualize these trends over time, then plot the data with a line graph with separate lines for male and female competitors. Give the plot an informative caption answering the two questions just posed.
+
+```{r, message=FALSE, echo=FALSE}
+avg_age = olympics %>%
+  filter(sport=='Swimming') %>% 
+  group_by(year, sex) %>%
+  summarize(average=mean(age))%>%
+  arrange(desc(sex))
+
+avg_age = as.data.frame(avg_age)
+
+avg_age
+```
+
+
+```{r, message=FALSE, echo=FALSE}
+ggplot(avg_age) +
+  geom_line(aes(x=year, y=average)) +
+  facet_wrap(~sex) +
+  labs(
+    title= "Figure 3. Average age of Olympic competitors over the years by sex",
+    x="year",
+    y="Average age",
+    caption = "Since 1925, the average age of the Olympic competitors has been steadily increasing across male and female"
+  )
+```
+
+## 3) K-nearest neighbors: cars
+
+```{r, message=FALSE, echo=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(rsample)  # for creating train/test splits
+library(caret)
+library(modelr)
+library(parallel)
+library(foreach)
+sclass <- read.csv("~/Desktop/ECO395M/data/sclass.csv")
+```
+
+## For trim level 350
+
+```{r, message=FALSE, echo=FALSE}
+#Filtering by 350 trim
+Three_fifty = sclass %>%
+  filter(trim==350)
+
+#Splitting into training and testing set
+Three_fifty_split = initial_split(Three_fifty, prop=0.8)
+Three_fifty_train = training(Three_fifty_split)
+Three_fifty_test = testing(Three_fifty_split)
+```
+
+### K=2
+```{r, message=FALSE, echo=FALSE}
+knn2 = knnreg(price ~ mileage, data=Three_fifty_train, k =2)
+
+#plot the fit#
+#attach the prediction to the test data frame
+Three_fifty_test = Three_fifty_test %>%
+  mutate(price_pred2= predict(knn2, Three_fifty_test))
+
+p_test350 = ggplot(data = Three_fifty_test)+
+  geom_point(mapping= aes(x= mileage, y= price), alpha =0.2)+
+  xlim(0,150000)
+
+p_test350 + geom_line(mapping= aes(x = mileage , y = price_pred2), color= 'blue')
+```
+
+### K=5
+```{r, message=FALSE, echo=FALSE}
+knn5 = knnreg(price ~ mileage, data=Three_fifty_train, k =5)
+
+Three_fifty_test = Three_fifty_test %>%
+  mutate(price_pred5= predict(knn5, Three_fifty_test))
+
+p_test350 = ggplot(data = Three_fifty_test)+
+  geom_point(mapping= aes(x= mileage, y= price), alpha =0.2)+
+  xlim(0,150000)
+
+p_test350 + geom_line(mapping= aes(x = mileage , y = price_pred5), color= 'blue')
+
+```
+
+### K=10
+```{r, message=FALSE, echo=FALSE}
+knn10 = knnreg(price ~ mileage, data=Three_fifty_train, k =10)
+
+Three_fifty_test = Three_fifty_test %>%
+  mutate(price_pred10= predict(knn10, Three_fifty_test))
+
+p_test350 = ggplot(data = Three_fifty_test)+
+  geom_point(mapping= aes(x= mileage, y= price), alpha =0.2)+
+  xlim(0,150000)
+
+p_test350 + geom_line(mapping= aes(x = mileage , y = price_pred10), color= 'blue')
+```
+
+
+
+### K=25
+```{r, message=FALSE, echo=FALSE}
+knn25 = knnreg(price ~ mileage, data=Three_fifty_train, k =25)
+
+Three_fifty_test = Three_fifty_test %>%
+  mutate(price_pred25= predict(knn25, Three_fifty_test))
+
+p_test350 = ggplot(data = Three_fifty_test)+
+  geom_point(mapping= aes(x= mileage, y= price), alpha =0.2)+
+  xlim(0,150000)
+
+p_test350 + geom_line(mapping= aes(x = mileage , y = price_pred25), color= 'blue')
+```
+
+### K=50
+```{r, message=FALSE, echo=FALSE}
+knn50 = knnreg(price ~ mileage, data=Three_fifty_train, k =50)
+
+Three_fifty_test = Three_fifty_test %>%
+  mutate(price_pred50= predict(knn50, Three_fifty_test))
+
+p_test350 = ggplot(data = Three_fifty_test)+
+  geom_point(mapping= aes(x= mileage, y= price), alpha =0.2)+
+  xlim(0,150000)
+
+p_test350 + geom_line(mapping= aes(x = mileage , y = price_pred50), color= 'blue')
+```
+
+### K=75
+```{r, message=FALSE, echo=FALSE}
+knn75 = knnreg(price ~ mileage, data=Three_fifty_train, k =75)
+
+Three_fifty_test = Three_fifty_test %>%
+  mutate(price_pred75= predict(knn75, Three_fifty_test))
+
+p_test350 = ggplot(data = Three_fifty_test)+
+  geom_point(mapping= aes(x= mileage, y= price), alpha =0.2)+
+  xlim(0,150000)
+
+p_test350 + geom_line(mapping= aes(x = mileage , y = price_pred75), color= 'blue')
+```
+
+### K=100
+```{r, message=FALSE, echo=FALSE}
+knn100 = knnreg(price ~ mileage, data=Three_fifty_train, k =100)
+
+Three_fifty_test = Three_fifty_test %>%
+  mutate(price_pred100= predict(knn100, Three_fifty_test))
+
+p_test350 = ggplot(data = Three_fifty_test)+
+  geom_point(mapping= aes(x= mileage, y= price), alpha =0.2)+
+  xlim(0,150000)
+
+p_test350 + geom_line(mapping= aes(x = mileage , y = price_pred100), color= 'blue')
+```
+
+```{r, message=FALSE, echo=FALSE}
+#Out of sample RMSE for different values of K
+k_grid_35 = c(2, 5, 10, 25, 50, 75, 100)
+rmse_35test = foreach(k= k_grid_35, .combine='c') %do% {
+  # train the model and calculate RMSE on the test set
+  knn_model = knnreg(price ~ mileage, data=Three_fifty_train, k=k, use.all=TRUE)
+  modelr::rmse(knn_model, Three_fifty_test)
+}
+
+#RMSE v K plot
+rmse_data = data.frame(k_grid_35, rmse_35test)
+ggplot(data= rmse_data)+
+  geom_line(mapping= aes(x=k_grid_35, y=rmse_35test))+
+  labs(
+    title= "RMSE for different values of K",
+    x= "K",
+    y= "RMSE"
+  )
+
+#plot of fitted model, i.e. predictions v x for optimal K= 50 for trim 350
+ggplot(data = Three_fifty_test)+
+  geom_line(mapping= aes(x= mileage, y= price_pred50))+
+  labs(
+    title= "Prediction of the model with optimal value value of k=50",
+    x= "mileage",
+    y= "price"
+  )
+```
+
+## For trim level 65AMG
+```{r, message=FALSE, echo=FALSE}
+#Filtering by 65AMG trim
+Sixtyfive_AMG = sclass%>%
+  filter(trim=='65 AMG')
+
+#Splitting into training and testing set
+Sixtyfive_AMG_split = initial_split(Sixtyfive_AMG, prop=0.8)
+Sixtyfive_AMG_train = training(Sixtyfive_AMG_split)
+Sixtyfive_AMG_test = testing(Sixtyfive_AMG_split)
+```
+
+###  K=2
+```{r, message=FALSE, echo=FALSE}
+knn2 = knnreg(price ~ mileage, data=Sixtyfive_AMG_train, k =2)
+
+#plot the fit#
+#attach the prediction to the test data frame
+Sixtyfive_AMG_test = Sixtyfive_AMG_test %>%
+  mutate(price_pred2= predict(knn2, Sixtyfive_AMG_test))
+
+p_test65AMG = ggplot(data = Sixtyfive_AMG_test)+
+  geom_point(mapping= aes(x= mileage, y= price), alpha =0.2)+
+  xlim(0,150000)
+
+p_test65AMG + geom_line(mapping= aes(x = mileage , y = price_pred2), color= 'blue')
+```
+
+### K=5
+```{r, message=FALSE, echo=FALSE}
+knn5 = knnreg(price ~ mileage, data=Sixtyfive_AMG_train, k =5)
+
+Sixtyfive_AMG_test = Sixtyfive_AMG_test %>%
+  mutate(price_pred5= predict(knn5, Sixtyfive_AMG_test))
+
+p_test65AMG = ggplot(data = Sixtyfive_AMG_test)+
+  geom_point(mapping= aes(x= mileage, y= price), alpha =0.2)+
+  xlim(0,150000)
+
+p_test65AMG + geom_line(mapping= aes(x = mileage , y = price_pred5), color= 'blue')
+```
+
+### K=10
+```{r, message=FALSE, echo=FALSE}
+knn10 = knnreg(price ~ mileage, data=Sixtyfive_AMG_train, k =10)
+
+Sixtyfive_AMG_test = Sixtyfive_AMG_test %>%
+  mutate(price_pred10= predict(knn10, Sixtyfive_AMG_test))
+
+p_test65AMG = ggplot(data = Sixtyfive_AMG_test)+
+  geom_point(mapping= aes(x= mileage, y= price), alpha =0.2)+
+  xlim(0,150000)
+
+p_test65AMG + geom_line(mapping= aes(x = mileage , y = price_pred10), color= 'blue')
+```
+
+### K=25
+```{r, message=FALSE, echo=FALSE}
+knn25 = knnreg(price ~ mileage, data=Sixtyfive_AMG_train, k =25)
+
+Sixtyfive_AMG_test = Sixtyfive_AMG_test %>%
+  mutate(price_pred25= predict(knn25, Sixtyfive_AMG_test))
+
+p_test65AMG = ggplot(data = Sixtyfive_AMG_test)+
+  geom_point(mapping= aes(x= mileage, y= price), alpha =0.2)+
+  xlim(0,150000)
+
+p_test65AMG + geom_line(mapping= aes(x = mileage , y = price_pred25), color= 'blue')
+```
+
+### K=50
+```{r, message=FALSE, echo=FALSE}
+knn50 = knnreg(price ~ mileage, data=Sixtyfive_AMG_train, k =50)
+
+Sixtyfive_AMG_test = Sixtyfive_AMG_test %>%
+  mutate(price_pred50= predict(knn50, Sixtyfive_AMG_test))
+
+p_test65AMG = ggplot(data = Sixtyfive_AMG_test)+
+  geom_point(mapping= aes(x= mileage, y= price), alpha =0.2)+
+  xlim(0,150000)
+
+p_test65AMG + geom_line(mapping= aes(x = mileage , y = price_pred50), color= 'blue')
+```
+
+### K=75
+```{r, message=FALSE, echo=FALSE}
+knn75 = knnreg(price ~ mileage, data=Sixtyfive_AMG_train, k =75)
+
+Sixtyfive_AMG_test = Sixtyfive_AMG_test %>%
+  mutate(price_pred75= predict(knn75, Sixtyfive_AMG_test))
+
+p_test65AMG = ggplot(data = Sixtyfive_AMG_test)+
+  geom_point(mapping= aes(x= mileage, y= price), alpha =0.2)+
+  xlim(0,150000)
+
+p_test65AMG + geom_line(mapping= aes(x = mileage , y = price_pred75), color= 'blue')
+```
+
+### K=100
+```{r, message=FALSE, echo=FALSE}
+knn100 = knnreg(price ~ mileage, data=Sixtyfive_AMG_train, k =100)
+
+Sixtyfive_AMG_test = Sixtyfive_AMG_test %>%
+  mutate(price_pred100= predict(knn100, Sixtyfive_AMG_test))
+
+p_test65AMG = ggplot(data = Sixtyfive_AMG_test)+
+  geom_point(mapping= aes(x= mileage, y= price), alpha =0.2)+
+  xlim(0,150000)
+
+p_test65AMG + geom_line(mapping= aes(x = mileage , y = price_pred100), color= 'blue')
+```
+
+```{r, message=FALSE, echo=FALSE}
+#Out of sample RMSE for different values of K
+k_grid_65AMG = c(2, 5, 10, 25, 50, 75, 100)
+rmse_65AMGtest = foreach(k= k_grid_65AMG, .combine='c') %do% {
+  # train the model and calculate RMSE on the test set
+  knn_model = knnreg(price ~ mileage, data=Sixtyfive_AMG_train, k=k, use.all=TRUE)
+  modelr::rmse(knn_model, Sixtyfive_AMG_test)
+}
+
+#RMSE v K plot
+rmse_data1 = data.frame(rmse_65AMGtest, rmse_65AMGtest)
+ggplot(data1= rmse_data1)+
+  geom_line(mapping= aes(x=k_grid_65AMG, y=rmse_65AMGtest))+
+  labs(
+    title= "RMSE for different values of K",
+    x= "K",
+    y= "RMSE"
+  )
+
+#plot of fitted model, i.e. predictions v x for optimal K= 5 for trim 54AMG
+ggplot(data = Sixtyfive_AMG_test)+
+geom_line(mapping= aes(x= mileage, y= price_pred5))+
+  labs(
+    title= "Prediction of the model with optimal value value of K=5",
+    x= "mileage",
+    y= "price"
+  )
+```
+
+
+Trim size 350 produces a larger optimal value of K. RMSE differs from one train/test split to another. In this particular random assignment of data into training and testing data in the ratio of 80:20, it so happened that for trim size 350, larger value of K yielded lowest estimate of RMSE. 
