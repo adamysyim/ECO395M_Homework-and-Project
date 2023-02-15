@@ -1,0 +1,366 @@
+---
+title: "ECO395M_Exercise2"
+author: "Youngseok Yim (EID: yy9739)"
+date: "2023-02-22"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Saratoga house prices
+
+```{r, message=FALSE, echo=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(modelr)
+library(rsample)
+library(mosaic)
+library(caret)
+library(foreach)
+data(SaratogaHouses)
+```
+
+```{r, message=FALSE, echo=FALSE, warning= FALSE}
+#For linear model
+#Split into training and testing sets
+saratoga_split = initial_split(SaratogaHouses, prop = 0.8)
+saratoga_train = training(saratoga_split)
+saratoga_test = testing(saratoga_split)
+
+#K- fold cross validation
+saratoga_folds = crossv_kfold(SaratogaHouses, k=10)
+
+#map the model-fitting function and use K-fold cross validation
+Model_medium = map(saratoga_folds$train, ~ lm(price ~ . - pctCollege - sewer - waterfront - landValue - newConstruction, data=.))
+Model_main = map(saratoga_folds$train, ~ lm(price ~ lotSize + age + landValue + livingArea + bedrooms + fireplaces + bathrooms + rooms + heating + fuel + centralAir + age*centralAir + lotSize*landValue + bedrooms*rooms + fireplaces*heating, data=.))
+```
+
+Mean RMSE for medium model 
+```{r, message=FALSE, echo=FALSE} 
+map2_dbl(Model_medium, saratoga_folds$test, modelr::rmse) %>% mean
+```
+
+Mean RMSE for main linear model 
+```{r, message=FALSE, echo=FALSE} 
+map2_dbl(Model_main, saratoga_folds$test, modelr::rmse) %>% mean
+```
+
+```{r, message=FALSE, echo=FALSE, warning = FALSE} 
+#k-nearest neighbors model
+#rescaling all except categorical variables
+saratoga_scale= SaratogaHouses %>%
+  mutate(across(c(lotSize, age, landValue, livingArea, pctCollege, bedrooms, fireplaces, bathrooms, rooms), scale))
+
+#Split rescaled data into training and testing sets
+saratoga_scale_split = initial_split(saratoga_scale, prop = 0.8)
+saratoga_scale_train = training(saratoga_scale_split)
+saratoga_scale_test = testing(saratoga_scale_split)
+
+saratoga_scale_folds = crossv_kfold(saratoga_scale, k=10)
+```
+
+Mean RMSE for k nearest neighbors with various k values
+```{r, message=FALSE, echo=FALSE, warning = FALSE} 
+#K- fold cross validation across a range of k
+k_grid = c(2, 5, 10, 20, 50, 75, 100, 200, 300, 400)
+
+cv_grid = foreach(k= k_grid, .combine= 'rbind') %dopar% {
+  modelk = map(saratoga_scale_folds$train, ~knnreg(price~ lotSize + age + landValue + livingArea + bedrooms + fireplaces + bathrooms + rooms + heating + fuel + centralAir, k = k, data =. , use.all=FALSE))
+  RMSE = map2_dbl(modelk, saratoga_scale_folds$test, modelr::rmse)
+  c(k=k, RMSE = mean(RMSE))
+} %>% as.data.frame
+
+cv_grid
+```
+
+I created linear and k-nearest neighbors regression models to predict house prices, using selected features that influence the price. For the linear model, I considered lot size, age, land value, living area, number of bedrooms, number of bathrooms, number of fireplaces, number of rooms, type of heating system, type of fuel used, availability of central air, interaction between age and central air, interaction between lot size and land value, interaction between number of bedrooms and rooms, and interaction between number fireplaces and type of heating system for predicting house price. 
+
+In the k-nearest neighbors model, I used lot size, age, land value, living area, number of bedrooms, fireplaces, number of bathrooms, number of rooms, type of heating system, type of fuel, and availability of central air as feature variables. Since the k- nearest neighbors model is adaptable to find interactions and nonlinearities, I omitted interaction between the feature variables from the model.
+
+After evaluating both models using out-of-sample RMSE, I found that the k-nearest neighbors model with k=20 had a lower average RMSE and performed better.
+
+## 2. Classification and retrospective sampling
+
+```{r, message=FALSE, echo=FALSE} 
+library(ggplot2)
+library(tidyverse)
+library(modelr)
+library(rsample)
+library(caret)
+library(foreach)
+german_credit <- read.csv("~/Desktop/ECO395M/data/german_credit.csv")
+```
+
+```{r, message=FALSE, echo=FALSE, results =FALSE} 
+german_credit %>%
+  group_by(history, Default) %>%
+  summarize(count=n())
+        
+german_credit %>%
+  group_by(history) %>%
+  summarize(count=n())
+```
+
+```{r, message=FALSE, echo=FALSE}
+Default_probability = c(0.6, 0.31, 0.17)
+barplot(Default_probability,
+        main = "Figure 2.1: Default Probability by Credit History",
+        xlab = "Credit History", ylab = "Probability",
+        names.arg = c("Good", "Poor", "Terrible"),
+        ylim = c(0, max(Default_probability)),
+        col = "darkblue")
+```
+
+```{r, message=FALSE, echo=FALSE}
+#For Logit model
+#Split into training and testing sets
+logit_default <- glm(Default ~ duration + amount + installment + age + history + purpose + foreign, 
+                     data = german_credit, family = binomial())
+coef(logit_default) %>% round(2)
+```
+
+Figure 2.1 displays a bar plot of default probabilities based on credit histories (good, bad, and terrible). Surprisingly, the probability of default is higher for individuals with good credit history (0.6) compared to those with bad (0.3) and terrible (0.17) credit history. The logit model coefficients also support this finding, with poor history having a coefficient of -1.11 and terrible history having a coefficient of -1.88, indicating a decrease in the odds of default as credit history worsens.
+
+However, the data set used in the study may not be suitable for predicting default probabilities. The bank selected defaulted loans for inclusion, resulting in an oversampling of defaults compared to a random sample of loans in the bank's portfolio. Therefore, if the purpose is to classify prospective borrowers into high or low default risk, the bank should use a random sampling method to avoid oversampling of defaults.
+
+## 3. Children and hotel reservations
+
+```{r, message=FALSE, echo=FALSE, warning=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(modelr)
+library(rsample)
+library(caret)
+library(foreach)
+hotels_dev <- read.csv("~/Desktop/ECO395M/data/hotels_dev.csv")
+hotels_val <- read.csv("~/Desktop/ECO395M/data/hotels_val.csv")
+```
+
+```{r, message=FALSE, echo=FALSE}
+#Split into training and testing sets
+hotels_dev_split = initial_split(hotels_dev, prop = 0.8)
+hotels_dev_train = training(hotels_dev_split)
+hotels_dev_test = testing(hotels_dev_split)
+```
+
+```{r, message=FALSE, echo=FALSE, warning= FALSE}
+#Fit the linear models
+lm_hotels_dev1= lm(children ~ market_segment + adults + customer_type + is_repeated_guest, data= hotels_dev_train)
+
+lm_hotels_dev2= lm(children ~ hotel + lead_time + stays_in_weekend_nights + stays_in_week_nights +adults + meal + market_segment + distribution_channel + is_repeated_guest +previous_cancellations + previous_bookings_not_canceled + reserved_room_type +assigned_room_type + booking_changes + deposit_type + days_in_waiting_list + customer_type + average_daily_rate + required_car_parking_spaces + total_of_special_requests, data= hotels_dev_train)
+
+lm_hotels_dev3= lm(children ~  hotel + lead_time + stays_in_weekend_nights + stays_in_week_nights +adults + meal + market_segment + distribution_channel + is_repeated_guest +previous_cancellations + previous_bookings_not_canceled + reserved_room_type +assigned_room_type + booking_changes + deposit_type + days_in_waiting_list + customer_type + average_daily_rate + required_car_parking_spaces + total_of_special_requests +stays_in_weekend_nights * reserved_room_type + is_repeated_guest* average_daily_rate + lead_time * total_of_special_requests +I(adults^2) + reserved_room_type*meal, data= hotels_dev_train)
+```
+
+```{r, message=FALSE, echo=FALSE, warning = FALSE, results= FALSE}
+#Predictions out of sample
+#Root mean squared error
+rmse(lm_hotels_dev1, hotels_dev_test)
+rmse(lm_hotels_dev2, hotels_dev_test)
+rmse(lm_hotels_dev3, hotels_dev_test )
+```
+
+```{r, message=FALSE, echo=FALSE, warning= FALSE}
+#K- fold cross validation
+hotels_dev_folds = crossv_kfold(hotels_dev, k=10)
+
+#map the model-fitting function and use K-fold cross validation
+lm_hotels_dev1_K = map(hotels_dev_folds$train, ~ lm(children ~ market_segment + adults + customer_type + is_repeated_guest, data= . ))
+
+lm_hotels_dev2_K = map(hotels_dev_folds$train, ~ lm(children ~ hotel + lead_time + stays_in_weekend_nights + stays_in_week_nights + adults + meal + market_segment + distribution_channel + is_repeated_guest + previous_cancellations + previous_bookings_not_canceled + reserved_room_type +assigned_room_type + booking_changes + deposit_type + days_in_waiting_list + customer_type + average_daily_rate + required_car_parking_spaces + total_of_special_requests, data= . ))
+
+lm_hotels_dev3_K = map(hotels_dev_folds$train, ~ lm(children ~  hotel + lead_time + stays_in_weekend_nights + stays_in_week_nights + adults + meal + market_segment + distribution_channel + is_repeated_guest + previous_cancellations + previous_bookings_not_canceled + reserved_room_type + assigned_room_type + booking_changes + deposit_type + days_in_waiting_list +customer_type + average_daily_rate + required_car_parking_spaces + total_of_special_requests + stays_in_weekend_nights * reserved_room_type + is_repeated_guest * average_daily_rate + lead_time * total_of_special_requests + I(adults^2) + reserved_room_type*meal, data= .))
+```
+
+```{r, message=FALSE, echo=FALSE, warning = FALSE}
+# Convert the "reserved_room_type" variable to a factor with the option "drop = FALSE"
+hotels_dev_train$reserved_room_type <- factor(hotels_dev_train$reserved_room_type)
+```
+
+Baseline 1: Mean RMSE
+```{r, message=FALSE, echo=FALSE, warning = FALSE}
+#map the RMSE calculation over the trained models and test sets simultaneously
+map2_dbl(lm_hotels_dev1_K, hotels_dev_folds$test, modelr::rmse) %>% mean
+```
+
+Baseline 2: Mean RMSE
+```{r, message=FALSE, echo=FALSE, warning = FALSE}
+map2_dbl(lm_hotels_dev2_K, hotels_dev_folds$test, modelr::rmse) %>% mean
+```
+
+Main linear model: Mean RMSE
+```{r, message=FALSE, echo=FALSE, warning = FALSE}
+map2_dbl(lm_hotels_dev3_K, hotels_dev_folds$test, modelr::rmse) %>% mean   
+```
+
+```{r, message=FALSE, echo=FALSE, warning=FALSE, fig.width=12, fig.height =10}
+#ROC curve
+phat_hotels_val = predict(lm_hotels_dev3, hotels_val)
+
+thresh_grid = seq(0.95, 0.05, by=-0.005)
+roc_curve_hotels_dev = foreach(thresh = thresh_grid, .combine='rbind') %do% {
+  yhat_hotels_val = ifelse(phat_hotels_val >= thresh, 1, 0)
+  
+# FPR, TPR for linear model
+confusion_out_lm_hotels_dev3 = table(y = hotels_val$children, yhat = yhat_hotels_val)
+  
+  out_lm_hotels_dev3 = data.frame(
+    TPR = confusion_out_lm_hotels_dev3[2,2]/sum(hotels_val$children==1),
+    FPR = confusion_out_lm_hotels_dev3[1,2]/sum(hotels_val$children==0))
+  rbind(out_lm_hotels_dev3)
+} %>% as.data.frame()
+
+ggplot(roc_curve_hotels_dev) + 
+  geom_line(aes(x=FPR, y=TPR)) + 
+  labs(title="Figure 3.1: ROC curve") +
+  theme_bw(base_size = 10) 
+```
+
+```{r, message=FALSE, echo=FALSE, warning= FALSE, results= FALSE}
+K_folds = 20
+
+hotels_val = hotels_val %>%
+  mutate(fold_id= rep(1:K_folds, length= nrow(hotels_val)) %>% sample())
+
+
+hotels_val_fold_id1= hotels_val %>%
+  filter(fold_id == 1) 
+phat_hotels_val_fold_id1 = predict(lm_hotels_dev3, hotels_val_fold_id1 )
+sum(phat_hotels_val_fold_id1)
+sum(hotels_val_fold_id1$children)
+
+hotels_val_fold_id2= hotels_val %>%
+  filter(fold_id == 2)
+phat_hotels_val_fold_id2 = predict(lm_hotels_dev3, hotels_val_fold_id2 )
+sum(phat_hotels_val_fold_id2)
+sum(hotels_val_fold_id2$children)
+
+hotels_val_fold_id3= hotels_val %>%
+  filter(fold_id == 3)
+phat_hotels_val_fold_id3 = predict(lm_hotels_dev3, hotels_val_fold_id3 )
+sum(phat_hotels_val_fold_id3)
+sum(hotels_val_fold_id3$children)
+
+hotels_val_fold_id4= hotels_val %>%
+  filter(fold_id == 4)
+phat_hotels_val_fold_id4 = predict(lm_hotels_dev3, hotels_val_fold_id4 )
+sum(phat_hotels_val_fold_id4)
+sum(hotels_val_fold_id4$children)
+
+hotels_val_fold_id5= hotels_val %>%
+  filter(fold_id == 5)
+phat_hotels_val_fold_id5 = predict(lm_hotels_dev3, hotels_val_fold_id5 )
+sum(phat_hotels_val_fold_id5)
+sum(hotels_val_fold_id5$children)
+
+hotels_val_fold_id6= hotels_val %>%
+  filter(fold_id == 6)
+phat_hotels_val_fold_id6 = predict(lm_hotels_dev3, hotels_val_fold_id6)
+sum(phat_hotels_val_fold_id6)
+sum(hotels_val_fold_id6$children)
+
+hotels_val_fold_id7= hotels_val %>%
+  filter(fold_id == 7)
+phat_hotels_val_fold_id7 = predict(lm_hotels_dev3, hotels_val_fold_id7 )
+sum(phat_hotels_val_fold_id7)
+sum(hotels_val_fold_id7$children)
+
+hotels_val_fold_id8= hotels_val %>%
+  filter(fold_id == 8)
+phat_hotels_val_fold_id8 = predict(lm_hotels_dev3, hotels_val_fold_id8 )
+sum(phat_hotels_val_fold_id8)
+sum(hotels_val_fold_id8$children)
+
+hotels_val_fold_id9= hotels_val %>%
+  filter(fold_id == 9)
+phat_hotels_val_fold_id9 = predict(lm_hotels_dev3, hotels_val_fold_id9 )
+sum(phat_hotels_val_fold_id9)
+sum(hotels_val_fold_id9$children)
+
+hotels_val_fold_id10= hotels_val %>%
+  filter(fold_id == 10)
+phat_hotels_val_fold_id10 = predict(lm_hotels_dev3, hotels_val_fold_id10 )
+sum(phat_hotels_val_fold_id10)
+sum(hotels_val_fold_id10$children)
+
+hotels_val_fold_id11= hotels_val %>%
+  filter(fold_id == 11)
+phat_hotels_val_fold_id11 = predict(lm_hotels_dev3, hotels_val_fold_id11 )
+sum(phat_hotels_val_fold_id11)
+sum(hotels_val_fold_id11$children)
+
+hotels_val_fold_id12= hotels_val %>%
+  filter(fold_id == 12)
+phat_hotels_val_fold_id12 = predict(lm_hotels_dev3, hotels_val_fold_id12 )
+sum(phat_hotels_val_fold_id12)
+sum(hotels_val_fold_id12$children)
+
+hotels_val_fold_id13= hotels_val %>%
+  filter(fold_id == 13)
+phat_hotels_val_fold_id13 = predict(lm_hotels_dev3, hotels_val_fold_id13 )
+sum(phat_hotels_val_fold_id13)
+sum(hotels_val_fold_id13$children)
+
+hotels_val_fold_id14= hotels_val %>%
+  filter(fold_id == 14)
+phat_hotels_val_fold_id14 = predict(lm_hotels_dev3, hotels_val_fold_id14)
+sum(phat_hotels_val_fold_id14)
+sum(hotels_val_fold_id14$children)
+
+hotels_val_fold_id15= hotels_val %>%
+  filter(fold_id == 15)
+phat_hotels_val_fold_id15 = predict(lm_hotels_dev3, hotels_val_fold_id15 )
+sum(phat_hotels_val_fold_id15)
+sum(hotels_val_fold_id15$children)
+
+hotels_val_fold_id16= hotels_val %>%
+  filter(fold_id == 16)
+phat_hotels_val_fold_id16 = predict(lm_hotels_dev3, hotels_val_fold_id16 )
+sum(phat_hotels_val_fold_id16)
+sum(hotels_val_fold_id16$children)
+
+hotels_val_fold_id17= hotels_val %>%
+  filter(fold_id == 17)
+phat_hotels_val_fold_id17 = predict(lm_hotels_dev3, hotels_val_fold_id17 )
+sum(phat_hotels_val_fold_id17)
+sum(hotels_val_fold_id17$children)
+
+hotels_val_fold_id18= hotels_val %>%
+  filter(fold_id == 18)
+phat_hotels_val_fold_id18 = predict(lm_hotels_dev3, hotels_val_fold_id18 )
+sum(phat_hotels_val_fold_id18)
+sum(hotels_val_fold_id18$children)
+
+hotels_val_fold_id19= hotels_val %>%
+  filter(fold_id == 19)
+phat_hotels_val_fold_id19 = predict(lm_hotels_dev3, hotels_val_fold_id19 )
+sum(phat_hotels_val_fold_id19)
+sum(hotels_val_fold_id19$children)
+
+hotels_val_fold_id20= hotels_val %>%
+  filter(fold_id == 20)
+phat_hotels_val_fold_id20 = predict(lm_hotels_dev3, hotels_val_fold_id20 )
+sum(phat_hotels_val_fold_id20)
+sum(hotels_val_fold_id20$children)
+```
+
+```{r, message=FALSE, echo=FALSE}
+library(knitr)
+Fold_id = c(1, 2, 3, 4, 5, 6 ,7 , 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20)
+Actual = c(sum(hotels_val_fold_id1$children), sum(hotels_val_fold_id2$children), sum(hotels_val_fold_id3$children), sum(hotels_val_fold_id4$children), sum(hotels_val_fold_id5$children), sum(hotels_val_fold_id6$children), sum(hotels_val_fold_id7$children), sum(hotels_val_fold_id8$children), sum(hotels_val_fold_id9$children), sum(hotels_val_fold_id10$children), sum(hotels_val_fold_id11$children), sum(hotels_val_fold_id12$children), sum(hotels_val_fold_id13$children), sum(hotels_val_fold_id14$children), sum(hotels_val_fold_id15$children), sum(hotels_val_fold_id16$children), sum(hotels_val_fold_id17$children), sum(hotels_val_fold_id18$children), sum(hotels_val_fold_id19$children), sum(hotels_val_fold_id20$children))
+
+Expected = c(sum(phat_hotels_val_fold_id1), sum(phat_hotels_val_fold_id2), sum(phat_hotels_val_fold_id3), sum(phat_hotels_val_fold_id4), sum(phat_hotels_val_fold_id5), sum(phat_hotels_val_fold_id6), sum(phat_hotels_val_fold_id7), sum(phat_hotels_val_fold_id8), sum(phat_hotels_val_fold_id9), sum(phat_hotels_val_fold_id10), sum(phat_hotels_val_fold_id11), sum(phat_hotels_val_fold_id12), sum(phat_hotels_val_fold_id13), sum(phat_hotels_val_fold_id14), sum(phat_hotels_val_fold_id15), sum(phat_hotels_val_fold_id16), sum(phat_hotels_val_fold_id17), sum(phat_hotels_val_fold_id18), sum(phat_hotels_val_fold_id19),sum(phat_hotels_val_fold_id20))
+```
+
+```{r, message=FALSE, echo=FALSE}
+Comparison_table= data.frame(Fold_id, Actual, Expected)
+kable(Comparison_table, caption = 'Actual v Expected number of bookings with childen')
+```
+
+Table 1 reveals that, among 20 folds each with 250 observations, the model has overpredicted the number of bookings with children in 50% of the folds, while it has underpredicted in 40%. In 10% of the folds, the model has accurately predicted the number of bookings with children. The greatest discrepancy between actual and predicted bookings is 8. Despite the fluctuations, the model's overall performance in predicting the number of bookings with children is considered satisfactory.
+
+
+
+
