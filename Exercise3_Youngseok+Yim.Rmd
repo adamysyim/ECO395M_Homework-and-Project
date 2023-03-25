@@ -1,0 +1,411 @@
+---
+title: "ECO395M_Exercise3"
+author: "Youngseok Yim (EID: yy9739)"
+date: "2023-03-22"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. What causes what?
+
+1.1 Cities with high crime rates may have deployed more police officers in an attempt to reduce crime. However, this correlation between crime rates and police presence can lead to false conclusions that more police leads to increased crime. Thus, it is not appropriate to simply analyze data from a few cities and run a regression between "Crime" and "Police."
+
+1.2 The researchers aimed to determine the effect of increasing police presence on crime rates, controlling for factors unrelated to crime. During high alert days in Washington D.C., when the threat of terrorism is high, police increase their presence. The researchers evaluated the impact of this increased police presence on crime rates. Results from Table 2 showed that during high alert days, crime rates in Washington D.C. decreased by an average of 7 crimes per day, a statistically significant decline at the 5% level. The decline remained significant at 5% level even when controlling for the Log of midday metro ridership, with a decrease of 6 crimes per day.
+
+1.3 It is possible that the decline in crime during high alert days is due to a decrease in the number of tourists, and therefore potential crime victims. To address this, the researchers controlled for midday metro ridership as a proxy for tourist numbers.
+
+1.4	During high alert days, the average number of crimes in the first police district area decreased by 2.621 crimes per day, a statistically significant decline at the 1% level. In other districts, the average number of crimes decreased by .571 crimes per day, but this decline was not statistically significant. 
+
+## 2. Tree modeling: dengue cases
+
+## 3. Predictive model building: green certification
+
+```{r, message=FALSE, echo=FALSE, results = FALSE}
+library(tidyverse)
+library(mosaic)
+library(foreach)
+library(modelr)
+library(rsample)
+library(caret)
+library(gamlr)
+library(kableExtra)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(pdp)
+
+greenbuildings <- read.csv("~/Desktop/ECO395M/data/greenbuildings.csv")
+
+#getting rid of null values
+colSums(is.na(greenbuildings))
+greenbuildings= na.omit(greenbuildings)
+
+greenbuildings = greenbuildings%>%
+  mutate(revenue_persquarefoot = Rent * leasing_rate)
+```
+
+I analyzed a data set on green buildings with the goal of constructing the best predictive model for forecasting revenue per square foot per calendar year. The process began with data cleaning, where I identified and removed all null values. Afterwards, I created the target variable, "revenue per square foot per calendar year," by multiplying the rent and leasing rate.
+
+```{r, message=FALSE, echo=FALSE}
+#Baseline model
+base = lm(revenue_persquarefoot ~ . - Rent - leasing_rate - CS_PropertyID - cluster - LEED - Energystar - total_dd_07, data= greenbuildings)
+```
+
+After creating a base model, I constructed five additional models to find the best predictive model. I compared their performance and chose the one with the highest accuracy. The base model excluded the interaction between rent and leasing rate as a feature variable, as it was deemed meaningless. Additionally, "CS_propertyID," the building's unique identifier, was removed as it did not contribute to the model. The variable "total_dd_07" was deleted due to its collinear relationship with "cd_total_07" and "hd_total07" (total_dd_07 = cd_total_07 + hd_total07). The impact of cluster on rent was considered to be reflected in "City_Market_Rent," the average rent per square-foot per calendar year in the building's local market, and so cluster was not included in the model. The model only considered "green_rating" and did not separate LEED and EnergyStar, resulting in their removal as well.
+
+
+```{r, message=FALSE, echo=FALSE, results = FALSE}
+#null model
+null = lm(revenue_persquarefoot ~ 1, data = greenbuildings)
+#full model
+full = lm(revenue_persquarefoot ~ (. - Rent - leasing_rate - CS_PropertyID - cluster - LEED - Energystar - total_dd_07)^2, data = greenbuildings)
+#forward selection
+system.time(fwd <- step(null, scope=formula(full), dir="forward"))
+length(coef(fwd))           
+
+#Backward selection
+system.time(back <- step(full, dir="backward"))
+length(coef(back))
+
+#stepwise selection
+system.time(stepwise <- step(base, scope= list(lower=null, upper=full, dir='both') ))
+length(coef(stepwise))
+```
+
+### Forward Selection Model
+Forward selection model starts with a model having no variables and add all possible one-variable additions to it, including every interaction. The model with the lowest AIC which we get from forward selection process is:
+
+revenue_persquarefoot ~ cluster + size + class_a + class_b + 
+    amenities + cd_total_07 + green_rating + age + hd_total07 + 
+    Electricity_Costs + net + cluster:size + amenities:green_rating + 
+    size:amenities + green_rating:age + size:Electricity_Costs + 
+    cluster:hd_total07 + cd_total_07:hd_total07 + hd_total07:Electricity_Costs + 
+    size:class_a + size:class_b + size:age + class_a:age + class_a:cd_total_07 + 
+    size:cd_total_07 + cluster:Electricity_Costs + cluster:age + 
+    age:Electricity_Costs + cd_total_07:Electricity_Costs + class_a:Electricity_Costs + 
+    amenities:Electricity_Costs + cd_total_07:net + class_b:amenities + 
+    size:green_rating
+
+The AIC for this model is 108159.9 and the number of variables is 34. 
+
+### Backward Selection Model
+Backward selection model starts with the full model that has all the variables including all of interactions, then improves its performance by deleting each variable. The model with the lowest AIC we get from backward  selection process is:
+
+revenue_persquarefoot ~ size + empl_gr + stories + age + renovated + 
+    class_a + class_b + green_rating + net + amenities + cd_total_07 + 
+    hd_total07 + Precipitation + Gas_Costs + Electricity_Costs + 
+    cluster + size:empl_gr + size:stories + size:age + size:renovated + 
+    size:class_a + size:class_b + size:green_rating + size:cd_total_07 + 
+    size:hd_total07 + size:Electricity_Costs + size:cluster + 
+    empl_gr:stories + empl_gr:renovated + empl_gr:class_a + empl_gr:class_b + 
+    empl_gr:Gas_Costs + stories:age + stories:renovated + stories:class_b + 
+    stories:cd_total_07 + stories:Precipitation + age:class_a + 
+    age:green_rating + age:cd_total_07 + age:hd_total07 + age:Electricity_Costs + 
+    age:cluster + renovated:hd_total07 + renovated:Precipitation + 
+    renovated:cluster + class_a:amenities + class_a:hd_total07 + 
+    class_a:Precipitation + class_a:Gas_Costs + class_a:Electricity_Costs + 
+    class_b:hd_total07 + class_b:Precipitation + class_b:Gas_Costs + 
+    class_b:Electricity_Costs + green_rating:amenities + amenities:Precipitation + 
+    amenities:Gas_Costs + amenities:Electricity_Costs + cd_total_07:Precipitation + 
+    cd_total_07:Gas_Costs + cd_total_07:Electricity_Costs + hd_total07:Precipitation + 
+    hd_total07:Gas_Costs + hd_total07:Electricity_Costs + Precipitation:cluster + 
+    Gas_Costs:cluster + Electricity_Costs:cluster
+
+The AIC for this model is  108044 and the number of variables is 68. 
+
+#### Stepwise selection Model 
+
+Stepwise selection model starts with our base model lm(revenue_persquarefoot ~ . - Rent - leasing_rate - CS_PropertyID - cluster - LEED - Energystar - total_dd_07)' and we considered all possible one-variable additions or deletions including interactions. The model with the lowest AIC we get from stepwise selection model is:
+
+revenue_persquarefoot ~ size + empl_gr + stories + age + renovated + 
+    class_a + class_b + green_rating + net + amenities + cd_total_07 + 
+    hd_total07 + Precipitation + Gas_Costs + Electricity_Costs + 
+    cluster + size:cluster + stories:class_a + size:Precipitation + 
+    empl_gr:Electricity_Costs + green_rating:amenities + Precipitation:cluster + 
+    hd_total07:Precipitation + amenities:Gas_Costs + amenities:Precipitation + 
+    stories:Gas_Costs + renovated:Precipitation + size:age + 
+    cd_total_07:Precipitation + stories:class_b + age:green_rating + 
+    class_a:Gas_Costs + class_a:Electricity_Costs + age:cluster + 
+    age:Electricity_Costs + renovated:cluster + Electricity_Costs:cluster + 
+    cd_total_07:hd_total07 + age:class_a + renovated:hd_total07 + 
+    class_a:Precipitation + stories:renovated + size:renovated + 
+    size:Electricity_Costs + size:stories + size:hd_total07 + 
+    class_a:hd_total07 + empl_gr:renovated + age:hd_total07 + 
+    amenities:Electricity_Costs + class_a:amenities + renovated:Gas_Costs + 
+    size:green_rating
+
+The AIC for this models is 108070.3 and the number of variables is 53. 
+
+The backward selection model has the lowest AIC when compared to the other three models, making it the best performing model according to AIC. Additionally, I conducted k-fold cross-validation to compare the performance of the four models (base, forward selection, backward selection, and step-wise selection). The average root mean squared error (RMSE) calculated using 10-fold cross-validation was 1037.316 for the base model, 1006.796 for the forward selection model, 1006.068 for the backward selection model, and 1006.601 for the step-wise selection model. The lowest RMSE, belonging to the backward selection model, further confirms that it is the best among the four.
+
+### RMSE from k-folds cross validation
+
+```{r, message=FALSE, echo=FALSE}
+gb_folds = crossv_kfold(greenbuildings, k=10)
+
+lm_base_k = map(gb_folds$train, ~ lm(revenue_persquarefoot ~ . - Rent - leasing_rate - CS_PropertyID - cluster - LEED - Energystar - total_dd_07, data= .))
+
+lm_forward_k = map(gb_folds$train, ~ lm(revenue_persquarefoot ~ cluster + size + class_a + class_b + 
+                                         amenities + cd_total_07 + green_rating + age + hd_total07 + 
+                                         Electricity_Costs + net + cluster:size + amenities:green_rating + 
+                                         size:amenities + green_rating:age + size:Electricity_Costs + 
+                                         cluster:hd_total07 + cd_total_07:hd_total07 + hd_total07:Electricity_Costs + 
+                                         size:class_a + size:class_b + size:age + class_a:age + class_a:cd_total_07 + 
+                                         size:cd_total_07 + cluster:Electricity_Costs + cluster:age + 
+                                         age:Electricity_Costs + cd_total_07:Electricity_Costs + class_a:Electricity_Costs + 
+                                         amenities:Electricity_Costs + cd_total_07:net + class_b:amenities + 
+                                         size:green_rating, data= .))
+
+lm_backward_k = map(gb_folds$train, ~ lm(revenue_persquarefoot ~ size + empl_gr + stories + age + renovated + 
+                                           class_a + class_b + green_rating + net + amenities + cd_total_07 + 
+                                           hd_total07 + Precipitation + Gas_Costs + Electricity_Costs + 
+                                           cluster + size:empl_gr + size:stories + size:age + size:renovated + 
+                                           size:class_a + size:class_b + size:green_rating + size:cd_total_07 + 
+                                           size:hd_total07 + size:Electricity_Costs + size:cluster + 
+                                           empl_gr:stories + empl_gr:renovated + empl_gr:class_a + empl_gr:class_b + 
+                                           empl_gr:Gas_Costs + stories:age + stories:renovated + stories:class_b + 
+                                           stories:cd_total_07 + stories:Precipitation + age:class_a + 
+                                           age:green_rating + age:cd_total_07 + age:hd_total07 + age:Electricity_Costs + 
+                                           age:cluster + renovated:hd_total07 + renovated:Precipitation + 
+                                           renovated:cluster + class_a:amenities + class_a:hd_total07 + 
+                                           class_a:Precipitation + class_a:Gas_Costs + class_a:Electricity_Costs + 
+                                           class_b:hd_total07 + class_b:Precipitation + class_b:Gas_Costs + 
+                                           class_b:Electricity_Costs + green_rating:amenities + amenities:Precipitation + 
+                                           amenities:Gas_Costs + amenities:Electricity_Costs + cd_total_07:Precipitation + 
+                                           cd_total_07:Gas_Costs + cd_total_07:Electricity_Costs + hd_total07:Precipitation + 
+                                           hd_total07:Gas_Costs + hd_total07:Electricity_Costs + Precipitation:cluster + 
+                                           Gas_Costs:cluster + Electricity_Costs:cluster, data= .))
+
+lm_stepwise_k = map(gb_folds$train, ~ lm(revenue_persquarefoot ~ size + empl_gr + stories + age + renovated + 
+                                           class_a + class_b + green_rating + net + amenities + cd_total_07 + 
+                                           hd_total07 + Precipitation + Gas_Costs + Electricity_Costs + 
+                                           cluster + size:cluster + stories:class_a + size:Precipitation + 
+                                           empl_gr:Electricity_Costs + green_rating:amenities + Precipitation:cluster + 
+                                           hd_total07:Precipitation + amenities:Gas_Costs + amenities:Precipitation + 
+                                           stories:Gas_Costs + renovated:Precipitation + size:age + 
+                                           cd_total_07:Precipitation + stories:class_b + age:green_rating + 
+                                           class_a:Gas_Costs + class_a:Electricity_Costs + age:cluster + 
+                                           age:Electricity_Costs + renovated:cluster + Electricity_Costs:cluster + 
+                                           cd_total_07:hd_total07 + age:class_a + renovated:hd_total07 + 
+                                           class_a:Precipitation + stories:renovated + size:renovated + 
+                                           size:Electricity_Costs + size:stories + size:hd_total07 + 
+                                           class_a:hd_total07 + empl_gr:renovated + age:hd_total07 + 
+                                           amenities:Electricity_Costs + class_a:amenities + renovated:Gas_Costs + 
+                                           size:green_rating, data= .))
+```
+
+### Baseline model : Mean RMSE
+```{r, message=FALSE, echo=FALSE}
+map2_dbl(lm_base_k, gb_folds$test, modelr::rmse) %>% mean
+```
+
+### Forward selection model: Mean RMSE
+```{r, message=FALSE, echo=FALSE}
+map2_dbl(lm_forward_k, gb_folds$test, modelr::rmse) %>% mean
+```
+
+### Backward selection model: Mean RMSE
+```{r, message=FALSE, echo=FALSE}
+map2_dbl(lm_backward_k, gb_folds$test, modelr::rmse) %>% mean
+```
+
+### Stepwise selection model: Mean RMSE
+```{r, message=FALSE, echo=FALSE}
+map2_dbl(lm_stepwise_k, gb_folds$test, modelr::rmse) %>% mean
+```
+
+### Lasso Regression
+I then applied lasso regression to determine if it could outperform the best model obtained from backward selection. The full model, including all variables and two-way interactions, was used for lasso. The resulting path plot from running the lasso regression is shown below.
+
+### Figure 3.1 Path plot of lasso regression 
+```{r, message=FALSE, echo=FALSE}
+#Lasso
+gbx = sparse.model.matrix(revenue_persquarefoot~ (. - Rent - leasing_rate - size - CS_PropertyID - cluster - LEED - Energystar - total_dd_07)^2, data = greenbuildings) [,-1] 
+gby = greenbuildings$revenue_persquarefoot
+gblasso = gamlr(gbx, gby)
+plot(gblasso)
+```
+
+```{r, message=FALSE, echo=FALSE, results = FALSE}
+gbbeta = coef(gblasso)
+```
+
+```{r, message=FALSE, echo=FALSE}
+log(gblasso$lambda[which.min(AICc(gblasso))])
+sum(gbbeta != 0)
+```
+
+The optimal value of lambda in a log scale is 2.39. The lowest AIC value is 108547.3 and the corresponding number of variables is 31 including the intercept. 
+
+### Lasso : Mean RMSE
+```{r, message=FALSE, echo=FALSE}
+lm_lasso = map(gb_folds$train, ~ lm(revenue_persquarefoot ~ class_b + cluster + empl_gr:class_a + empl_gr:class_a  + 
+                                      empl_gr:Precipitation + stories:renovated + stories:class_a + stories:green_rating + 
+                                      stories:net + stories:cd_total_07+ stories:Precipitation + stories:cluster + 
+                                      age:class_a + age:green_rating + age:cd_total_07 + age:cluster + renovated:Precipitation + 
+                                      renovated:cluster + class_a:cluster + class_b:amenities + class_b:hd_total07 + 
+                                      class_b:cluster + green_rating:amenities + green_rating:cd_total_07 + 
+                                      green_rating:Electricity_Costs + green_rating:cluster + net:cluster + 
+                                      amenities:Electricity_Costs + amenities:cluster + hd_total07:Electricity_Costs + 
+                                      Electricity_Costs:cluster, data= .))
+
+map2_dbl(lm_lasso, gb_folds$test, modelr::rmse) %>% mean
+```
+
+I performed k-fold cross validation on the lasso regression model. The results showed that the RMSE for lasso regression was higher compared to any of the models derived from step-wise selection, indicating that the step-wise selection model performs better than lasso regression in this case.
+
+### Random Forest
+
+Lastly, I applied a random forest model using the base model with 500 trees. Figure 3.3 shows that 500 trees were sufficient to reduce errors.
+
+### Figure 3.3 Out of bag MSE as a function of number of trees
+```{r, message=FALSE, echo=FALSE}
+#Random Forest
+random_forest = randomForest (revenue_persquarefoot ~ . - Rent - leasing_rate - CS_PropertyID - cluster - LEED - Energystar - total_dd_07, data= greenbuildings)
+
+plot(random_forest)
+```
+
+### Random Forest : Mean RMSE
+```{r, message=FALSE, echo=FALSE}
+random_forest_k = map(gb_folds$train, ~ randomForest (revenue_persquarefoot ~ . - Rent - leasing_rate - CS_PropertyID - cluster - LEED - Energystar - total_dd_07, data= .))
+
+map2_dbl(random_forest_k, gb_folds$test, modelr::rmse) %>% mean
+```
+
+The RMSE from the k-fold cross-validation for the Random Forest model was lower than the RMSE of any of the models we used above. Therefore, we can conclude that the model derived from the Random Forest performs the best. To determine the average change in rental income per square foot per calendar year associated with green certification while holding other building features constant, we used the 'partial' function in the 'pdp package'.
+
+```{r, message=FALSE, echo=FALSE}
+partial(random_forest, pred.var = 'green_rating')
+```
+
+The change in rental income per square foot per calendar year resulting from green certification, while keeping all other building features constant, can be determined by finding the difference between the predicted value (yhat) when green_rating is 1 and the predicted value (yhat) when green_rating is 0.
+
+
+
+## 4. Predictive model building: California housing
+
+```{r, message=FALSE, echo=FALSE}
+library(tidyverse)
+library(mosaic)
+library(foreach)
+library(modelr)
+library(rsample)
+library(caret)
+library(gamlr)
+library(kableExtra)
+library(rpart)
+library(rpart.plot)
+library(randomForest)
+library(gbm)
+
+CAhousing <- read.csv("~/Desktop/ECO395M/data/CAhousing.csv")
+```
+
+For this exercise, my goal was to create the most accurate model for predicting the median market value of houses in a specific census tract. I began with a baseline linear regression model that included all relevant variables without any interactions. Next, I developed two additional models: a Random Forest regression model and a boosting model. These models were designed to improve upon the baseline model and provide more accurate predictions.
+
+## Baseline linear regression model
+
+medianHouseValue ~ longitude + latitude +  housingMedianAge + population + households + totalRooms + totalBedrooms + medianIncome
+
+```{r, message=FALSE, echo=FALSE}
+CAhousing_folds = crossv_kfold(CAhousing, k=10)
+
+#Baseline model: A linear model with all the feature variables without interactions - map the model fitting 
+## function and use K-fold cross validation
+baseline_model = map(CAhousing_folds$train, ~ lm(medianHouseValue ~ longitude + latitude + housingMedianAge + totalRooms + totalBedrooms + population + households +
+                                                   medianIncome, data = .))
+```
+
+### Baseline model : Mean RMSE
+```{r, message=FALSE, echo=FALSE}
+map2_dbl(baseline_model, CAhousing_folds$test, modelr::rmse) %>% mean
+```
+
+## Random Forest model
+
+I fitted a random forest model based on the base model. By examining the plot below, which displays the out-of-bag mean squared error (MSE) as a function of the number of trees, I determined that using 500 trees is sufficient to reduce errors. Therefore, I selected to use 500 trees for the model.
+
+### Figure 4.1 Out of bag MSE as a function of number of trees
+```{r, message=FALSE, echo=FALSE}
+#Random Forest
+CA_randomforest = randomForest(medianHouseValue ~ longitude + latitude + housingMedianAge +
+                                                                     totalRooms + totalBedrooms + population + households +
+                                                                     medianIncome, data = CAhousing)
+
+plot(CA_randomforest)
+
+CAhousing_randomForest = map(CAhousing_folds$train, ~ randomForest(medianHouseValue ~ longitude + latitude + housingMedianAge +
+                                                                     totalRooms + totalBedrooms + population + households +
+                                                                     medianIncome, data = .))
+
+
+```
+
+### Random Forest model : Mean RMSE
+```{r, message=FALSE, echo=FALSE}
+map2_dbl(CAhousing_randomForest, CAhousing_folds$test, modelr::rmse) %>% mean
+```
+
+## Boosting model
+Finally, I fitted a boosting model, also starting with the base model, as was done with the Random Forest model. The root mean squared error (RMSE) from the k-fold cross-validation was slightly higher than that of the Random Forest model. Specifically, it was recorded as below:
+
+```{r, message=FALSE, echo=FALSE, warning = FALSE}
+CAhousing_boost = map(CAhousing_folds$train, ~ gbm(medianHouseValue ~ longitude + latitude + housingMedianAge +
+                                                     totalRooms + totalBedrooms + population + households +
+                                                     medianIncome, data = .,interaction.depth = 4, n.trees = 500, distribution = "gaussian", shrinkage = .05))
+```
+
+### Boosting model : Mean RMSE
+```{r, message=FALSE, echo=FALSE}
+map2_dbl(CAhousing_boost, CAhousing_folds$test, modelr::rmse) %>% mean
+```
+
+Since the Random Forest model achieved the lowest RMSE value during k-fold cross-validation, it was selected for prediction purposes.
+
+```{r, message=FALSE, echo=FALSE}
+#Random Forest (best model) for prediction
+randomforest_model = randomForest(medianHouseValue ~ longitude + latitude + housingMedianAge +
+                                    totalRooms + totalBedrooms + population + households +
+                                    medianIncome, data= CAhousing)
+
+CAhousing = CAhousing %>%
+  mutate(medianHouseValue_hat = predict(randomforest_model, CAhousing))
+
+CAhousing = CAhousing %>%
+  mutate(residuals = medianHouseValue - medianHouseValue_hat)
+```
+
+```{r, message=FALSE, echo=FALSE, fig.width =16, fig.height= 20}
+#plots in CA map
+library(maps)
+library(mapdata)
+library(ggmap)
+states <- map_data("state")
+ca_df <- subset(states, region == "california")
+
+ca_base <- ggplot() +
+  coord_fixed(ratio = 1.3) +
+  geom_polygon(data = ca_df, mapping = aes(x = long, y = lat, group = group), color = "black", fill = "#808080", size = 0.5)
+```
+
+### Figure 4.2 Mean house value across various latitudes and longitudes in California
+```{r, message=FALSE, echo=FALSE, fig.width =16, fig.height= 20}
+ca_base + geom_point(data=CAhousing,aes(x= longitude, y= latitude, color = medianHouseValue))
+```
+
+### Figure 4.3 Prediction of Mean house value across various latitudes and longitudes in California using Random Forest 
+```{r, message=FALSE, echo=FALSE, fig.width =16, fig.height= 20}
+ca_base + geom_point(data=CAhousing,aes(x= longitude, y= latitude, color = medianHouseValue_hat))
+```
+
+### Figure 4.4 Residuals from prediction of mean house value using Random Forest 
+```{r, message=FALSE, echo=FALSE, fig.width =16, fig.height= 20}
+ca_base + geom_point(data=CAhousing,aes(x= longitude, y= latitude, color = residuals))
+
+
+
+
