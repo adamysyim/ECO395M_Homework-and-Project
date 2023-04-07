@@ -1,0 +1,284 @@
+---
+title: "ECO395M_Exercise4"
+author: "Youngseok Yim (EID: yy9739)"
+date: "2023-04-17"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Clustering and PCA
+
+```{r, message=FALSE, echo=FALSE}
+library(ggplot2)
+library(foreach)
+library(mosaic)
+library(tidyverse)
+library(ggcorrplot)
+
+wine <- read.csv("~/Desktop/ECO395M/data/wine.csv")
+```
+
+First, the data is cleaned by centering and scaling.
+
+```{r, message=FALSE, echo=FALSE}
+#Center and scale the data
+X <- wine[, 1:11]
+X <- scale(X, center = TRUE, scale = TRUE)
+
+# Extract the mean (center) and standard deviation (scale) of the rescaled data
+mu <- attr(X, "scaled:center")
+sigma <- attr(X, "scaled:scale")
+```
+
+I utilized k-means for clustering with k=2, as there were two wine varieties by color: red and white, with 25 observations. To verify the efficacy of k-means in separating the data points into the correct wine color groups, I compared the chemical property averages of the original white and red wine data with those in the clustered data.
+
+```{r, message=FALSE, echo=FALSE}
+
+# Run k-means with 2 clusters and 25 starts
+cluster1 <- kmeans(X, 2, nstart = 25)
+
+# Calculate average values of all chemical properties by color
+options(dplyr.width =Inf)
+wine %>%
+  group_by(color) %>%
+  summarize_all(mean)
+
+# Calculate average values of all chemical properties by cluster
+cluster1$center[1,] * sigma + mu
+cluster1$center[2,] * sigma + mu
+```
+
+By comparing the chemical property averages of red and white wine in both the original and clustered data, it is evident that k-means effectively separates red and white wines. The averages of chemical properties are almost the same in both the original and k-means clustered data for red wine, as well as for white wine.
+
+To validate this, I also created a confusion matrix. The results show that k-means accurately clustered the wine data by color, with an accuracy rate of 98.6%. This confirms that k-means clustering achieved excellent dimension reduction in this instance.
+
+```{r, message=FALSE, echo=FALSE}
+# Assign cluster names based on wine color
+
+wine$cluster[cluster1$cluster == 1] <- "red_hat"
+wine$cluster[cluster1$cluster == 2] <- "white_hat"
+
+# Create a contingency table for color vs. cluster
+
+table1 <- table(wine$color, wine$cluster)
+print(table1)
+
+# Calculate accuracy by finding the ratio of correctly classified wines to the total number of wines
+
+accuracy <- sum(diag(table1))/sum(table1)
+print(accuracy)
+```
+
+After implementing k-means, I moved on to Principal Component Analysis (PCA). The below table shows that the first three principal components account for 64.4% of the total variance in the data set, which is a significant amount. Consequently, I utilized the first three components for clustering.
+
+```{r, message=FALSE, echo=FALSE}
+
+#Load and rescale the wine data
+wine <- read.csv("~/Desktop/ECO395M/data/wine.csv")
+X <- wine[, 1:11]
+X <- scale(X, center = TRUE, scale = TRUE)
+
+#Perform PCA on rescaled data
+PCAwine <- prcomp(X, scale = TRUE)
+
+#Summarize the results of PCA
+summary(PCAwine)
+```
+
+
+```{r, message=FALSE, echo=FALSE}
+
+round(PCAwine$rotation[,1:3], 2)
+
+scores = PCAwine$x[,1:3]
+
+# Run k-means clustering on PCA scores
+cluster_pca = kmeans(scores, 2, nstart=25)
+
+# Plot PCA scores and color by cluster assignment
+ggplot(data=wine, aes(x=scores[,1], y=scores[,2], color=factor(cluster_pca$cluster))) +
+  geom_point()
+
+# Assign cluster names based on wine color
+wine[cluster_pca$cluster==1, 'cluster'] <- "red_hat"
+wine[cluster_pca$cluster==2, 'cluster'] <- "white_hat"
+
+# Create a contingency table for color vs. cluster
+table2 <- xtabs(~color + cluster, data = wine) 
+print(table2)
+
+# Calculate the proportion of correctly assigned wines
+accuracy <- sum(diag(table2))/sum(table2)
+print(accuracy)
+```
+
+The clustering based on the scores of the three principal components also showed good results with an accuracy of 98.4%. However, PCA is not as straightforward as k-means. In this case, I utilized the scores from the principal components to form clusters. Given the higher accuracy of k-means and its straightforwardness, it is more practical to use k-means for this data set.
+
+The wine quality was rated on a scale of 1 to 10 in the data set, with the absence of ratings 1, 2, and 10. As a result, the wine in the data set was rated between 2 and 9. I applied k-means with k=7 and 25 observations.
+
+```{r, message=FALSE, echo=FALSE, warning = FALSE}
+#Cluster the wine data into 7 clusters using k-means
+cluster2 = kmeans(X, 7, nstart=25)
+
+#Create a contingency table to summarize the relationship between wine quality and cluster assignment
+table3 = xtabs(~wine$quality + cluster2$cluster)
+print(table3)
+```
+
+The confusion matrix reveals that k-means clustering failed to differentiate between the various wine quality ratings. For instance, all of the clusters have a substantial number of wines rated 5, 6, and 7, lacking clear differentiation.
+
+## 2. Market Segmentation
+
+I began by cleaning the dataset, which originally had 7,882 data points and 36 variables. 
+
+To eliminate spam and pornographic content, I filtered out all users whose tweets were classified as "spam" or "adult". I then removed the "spam" and "adult" variables from the dataset. Since they did not offer any valuable insights, I also excluded the "uncategorized" and "chatter" variables. The final dataset consisted of 7,309 data points and 32 variables.
+
+```{r, message=FALSE, echo=FALSE}
+library(tidyverse)
+library(foreach)
+library(cluster)
+library(corrplot)
+
+# Load the social marketing data set
+social_marketing <- read.csv("~/Desktop/ECO395M/data/social_marketing.csv")
+
+# Filter out the observations with spam and adult category
+social_marketing <- social_marketing[social_marketing$spam == 0 & social_marketing$adult == 0, ]
+
+# Select variables of interest
+social_marketing <- select(social_marketing, - chatter, - uncategorized, -spam, -adult)
+
+# Standardize the data
+Z <- scale(social_marketing[, 2:33], center = TRUE, scale = TRUE)
+
+# Retrieve the center and scale of the standardized data
+mu <- attr(Z, "scaled:center")
+sigma <- attr(Z, "scaled:scale")
+```
+
+In order to identify market segments, I employed cluster analysis. Since the data lacked any hierarchical structure, I chose to use K-means clustering. I utilized the K-means++ algorithm for this analysis.
+
+To determine the optimal number of clusters (K) for the analysis, I utilized both the Elbow plot and CH index methods.
+
+### Figure 2.1 Elbow Plot 
+```{r, message=FALSE, echo=FALSE}
+
+#Elbow plot for finding optimal k
+k_grid <- seq(from = 2, to = 25, by = 1)
+SSE_grid <- sapply(k_grid, function(k) {
+  cluster_k <- kmeans(Z, centers = k, nstart = 25, iter.max = 100)
+  sum(cluster_k$withinss)
+})
+
+plot(k_grid, SSE_grid)
+```
+
+### Figure 2.2 CH index plot
+```{r, message=FALSE, echo=FALSE}
+#CH index
+N <- nrow(Z)
+k_grid <- 2:25
+CH_grid <- sapply(k_grid, function(k) {
+  cluster_k <- kmeans(Z, centers = k, nstart = 25, iter.max = 100)
+  W <- cluster_k$tot.withinss
+  B <- cluster_k$betweenss
+  CH <- (B/W) * ((N-k)/ (k-1))
+  CH
+})
+
+plot(k_grid, CH_grid, type = "b")
+```
+
+The optimal value of K is not immediately obvious from the graph. However, the plots suggest that K=5 may be a potential candidate. To validate this, I have also plotted a correlogram to identify any singularities among the variables.
+
+### Figure 2.3 Correlogram
+```{r, message=FALSE, echo=FALSE}
+
+C <- cor(Z)
+
+corrplot(C, type = "lower", method = "color", order = "hclust", hclust.method = "ward.D", tl.cex = 0.75, tl.col = "black", nstart = 50)
+```
+
+The correlogram reveals the existence of subgroups of variables that exhibit high levels of correlation. The variables 'family', 'school', 'food', 'sports_fandom', and 'religion' appear to have a strong relationship. Similarly, 'computers', 'travel', 'politics', 'news', and 'automotive' show correlations. There is also a correlation among 'outdoors', 'health_nutrition', and 'personal_fitness'. 'Sports_playing', 'online_gaming', and 'college_uni' also display a relationship. Lastly, 'beauty', 'cooking', and 'fashion' seem to have a substantial correlation. Thus, the correlogram supports the finding that the optimal value of K is 5.
+
+```{r, message=FALSE, echo=FALSE}
+#using k =5
+cluster2 = kmeans(X, 7, nstart=25)
+```
+
+### Summary of cluster 1
+```{r, message=FALSE, echo=FALSE}
+summary(cluster2$cluster==1)
+```
+
+### Summary of Cluster 2
+```{r, message=FALSE, echo=FALSE}
+summary(cluster2$cluster==2)
+```
+
+### Summary of Cluster 3
+```{r, message=FALSE, echo=FALSE}
+summary(cluster2$cluster==3)
+```
+
+### Summary of Cluster 4
+```{r, message=FALSE, echo=FALSE}
+summary(cluster2$cluster==4)
+```
+
+### Summary of Cluster 5
+```{r, message=FALSE, echo=FALSE}
+summary(cluster2$cluster==5)
+```
+
+### What are the clusters?
+```{r, message=FALSE, echo=FALSE, warning= FALSE}
+cluster2$center[1,]*sigma + mu
+cluster2$center[2,]*sigma + mu
+cluster2$center[3,]*sigma + mu
+cluster2$center[4,]*sigma + mu
+cluster2$center[5,]*sigma + mu
+```
+
+After conducting a K-means++ clustering analysis with K=5, I evaluated the distribution of data points among the clusters. The cluster with the largest number of data points, accounting for approximately 60% of the total sample, consisted of individuals who had tweeted an average of less than 2 times across all categories. This could indicate that most followers of "NutrientH20" are inactive on Twitter or social media platforms. Despite their inactivity, they continue to follow "NutrientH20", suggesting that the company's current social media marketing strategy is effective.
+
+The cluster with the smallest number of data points, on the other hand, comprised individuals who tweeted more frequently about topics such as photo sharing, cooking, and fashion. To reach and appeal to these individuals, who have a higher interest in these topics, the company should position their brand as relevant to photo sharing, cooking, or fashion.
+
+## 3. Association rules for grocery purchases
+
+```{r, message=FALSE, echo=FALSE}
+library(tidyverse)
+library(arules)
+library(arulesViz)
+library(igraph)
+
+groceries <- read.transactions("~/Desktop/ECO395M/data/groceries.txt", header=FALSE, sep= ",")
+```
+
+```{r, message=FALSE, echo=FALSE, results = FALSE, warning= FALSE}
+groceries_rules= apriori(groceries,
+                         parameter = list(support= .01, confidence = .1, maxlen=2))
+```
+
+### Figure 3.1 Top 5 items with highest support
+```{r, message=FALSE, echo=FALSE}
+itemFrequencyPlot(groceries, topN=5)
+```
+
+I utilized the 'apriori' function to identify various association rules with a support of 0.01, confidence of 0.1, and a maximum length of 2, resulting in a set of 339 rules. Upon examining the items with the highest support, the top 5 items identified were whole milk, other vegetables, rolls/buns, soda, and yogurt, as indicated in the accompanying figure.
+
+### Figure 3.2 Plot of Association rules
+```{r, message=FALSE, echo=FALSE}
+plot(groceries_rules, measure = c("support", "lift"), shading = "confidence")
+```
+
+To uncover strong associations, I applied a threshold of 0.3 for confidence and 2 for lift to the association rules generated from the apriori function with support set at 0.01 and a maximum length of 2. The result was a subset of 9 association rules with high lift and confidence. The threshold selection was based on the visualization of the association rule plot, where the majority of the points did not exceed a confidence of 0.3 or a lift of 2.
+
+```{r, message=FALSE, echo=FALSE}
+arules::inspect(subset(groceries_rules, lift > 2 & confidence > 0.3))
+```
+
+The results of the association rule analysis show that the majority of the rules make logical sense. The first rule in the table highlights that the presence of onions implies the presence of other vegetables, which is a common combination. Additionally, the association between beef and root vegetables, as well as hamburger meat and other vegetables, are also plausible.
